@@ -1,0 +1,2 @@
+# jurnaltradingforex
+jurnaltradingforex
