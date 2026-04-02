@@ -1,0 +1,178 @@
+<!DOCTYPE html><html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Journal Pro (Clean)</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body{background:#0e1117;color:white;font-family:Arial;padding:20px}
+h1{margin-bottom:10px}
+input,select,button{padding:8px;margin:5px;border-radius:8px;border:none;background:#1a1f29;color:white}
+button{background:#00ff9c;color:black;font-weight:bold;cursor:pointer}
+table{width:100%;margin-top:15px;border-collapse:collapse}
+th,td{padding:8px;text-align:center;font-size:14px}
+.aktif{background:#1e3a8a}
+.nonaktif{background:#3a3a3a}
+.tp{background:#14532d}
+.sl{background:#7f1d1d}
+.bep{background:#444c5c}
+.stats{margin-top:15px;font-size:15px;line-height:1.6}
+canvas{background:#0b0f14;border-radius:12px;margin-top:15px}
+</style>
+</head>
+<body><h1>Trading Journal</h1>Pair <input id="pair"> Risk <input id="risk" type="number"> RR <input id="rr" type="number" step="0.1">
+
+Status <select id="status">
+
+<option value="aktif">Aktif</option>
+<option value="nonaktif">Tidak Aktif</option>
+</select>Hasil <select id="hasil">
+
+<option value="">Belum</option>
+<option value="tp">TP</option>
+<option value="sl">SL</option>
+<option value="bep">BEP</option>
+</select><br>
+<button onclick="addTrade()">Tambah</button>
+<button onclick="exportData()">Export</button>
+<input type="file" id="importFile" hidden>
+<button onclick="document.getElementById('importFile').click()">Import</button><table>
+<thead>
+<tr>
+<th>Pair</th><th>RR</th><th>Risk</th><th>Status</th><th>Hasil</th><th>Profit</th><th>Aksi</th>
+</tr>
+</thead>
+<tbody id="tbody"></tbody>
+</table><div class="stats">
+Total Profit: <span id="total">0</span><br>
+Winrate: <span id="winrate">0%</span><br>
+Expectancy: <span id="expectancy">0R</span><br>
+Max Drawdown: <span id="dd">0%</span>
+</div><canvas id="chart" height="120"></canvas>
+
+<script>
+let trades = JSON.parse(localStorage.getItem("trades") || "[]");
+let chart;
+
+function format(num){
+  return new Intl.NumberFormat("id-ID").format(num)+" IDR";
+}
+
+function save(){
+  localStorage.setItem("trades", JSON.stringify(trades));
+  render();
+}
+
+function hitungProfit(t){
+  if(t.hasil === "tp") return t.risk * t.rr;
+  if(t.hasil === "sl") return -t.risk;
+  if(t.hasil === "bep") return 0;
+  return null;
+}
+
+function addTrade(){
+  const t = {
+    pair: pair.value,
+    risk: parseFloat(risk.value),
+    rr: parseFloat(rr.value),
+    status: status.value,
+    hasil: hasil.value
+  };
+
+  if(!t.pair || !t.risk || !t.rr) return;
+
+  trades.push(t);
+  pair.value = risk.value = rr.value = "";
+  hasil.value = "";
+  save();
+}
+
+function deleteTrade(i){
+  trades.splice(i,1);
+  save();
+}
+
+function render(){
+  let tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
+
+  let total = 0, win=0, loss=0, closed=0;
+  let equity=[0], peak=0, dd=0;
+  let totalR=0;
+
+  trades.forEach((t,i)=>{
+    let profit = hitungProfit(t);
+
+    if(t.hasil === "tp"){
+      total += profit; win++; closed++; totalR += t.rr;
+    }
+    else if(t.hasil === "sl"){
+      total += profit; loss++; closed++; totalR -= 1;
+    }
+    else if(t.hasil === "bep"){
+      closed++;
+    }
+
+    if(t.hasil){
+      equity.push(total);
+      peak = Math.max(peak, total);
+      dd = Math.max(dd, peak - total);
+    }
+
+    let tr = document.createElement("tr");
+    tr.className = t.status;
+
+    tr.innerHTML = `
+    <td>${t.pair}</td>
+    <td>1:${t.rr}</td>
+    <td>${format(t.risk)}</td>
+    <td>${t.status}</td>
+    <td class="${t.hasil}">${t.hasil || "-"}</td>
+    <td>${profit!==null ? format(profit) : "-"}</td>
+    <td><button onclick="deleteTrade(${i})">X</button></td>`;
+
+    tbody.appendChild(tr);
+  });
+
+  let winrate = closed ? Math.round(win/closed*100) : 0;
+  let expectancy = closed ? (totalR/closed).toFixed(2) : 0;
+
+  document.getElementById("total").textContent = format(total);
+  document.getElementById("winrate").textContent = winrate + "%";
+  document.getElementById("expectancy").textContent = expectancy + "R";
+  document.getElementById("dd").textContent = (peak ? ((dd/peak)*100).toFixed(1) : 0) + "%";
+
+  drawChart(equity);
+}
+
+function drawChart(data){
+  if(chart) chart.destroy();
+  chart = new Chart(document.getElementById("chart"),{
+    type:"line",
+    data:{labels:data.map((_,i)=>i), datasets:[{data:data, tension:0.3, borderColor:"#00ff9c"}]},
+    options:{plugins:{legend:{display:false}}, scales:{x:{display:false}, y:{ticks:{color:"white"}}}}
+  });
+}
+
+function exportData(){
+  const blob = new Blob([JSON.stringify(trades,null,2)],{type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "journal.json";
+  a.click();
+}
+
+document.getElementById("importFile").addEventListener("change",e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    trades = JSON.parse(ev.target.result);
+    save();
+  };
+  reader.readAsText(file);
+});
+
+render();
+</script></body>
+</html>
